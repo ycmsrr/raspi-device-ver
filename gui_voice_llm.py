@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-# gui_voice_llm_fixedqa.py
+# gui_voice_llm.py
 
 import os
 import sys
 import queue
 import json
-import random
-import time
 import subprocess
 import threading
 import sounddevice as sd
@@ -14,14 +12,12 @@ import re
 import tkinter as tk
 from tkinter import scrolledtext, messagebox
 from vosk import Model, KaldiRecognizer
-from rapidfuzz import process, fuzz
 
 # === Configuration (adjust these paths) ===
-VOSK_MODEL_PATH = os.path.expanduser("~/gpt4all-cli/vosk-model-small-en-us-0.15")
+VOSK_MODEL_PATH = os.path.expanduser("~/gpt4all-cli/vosk-model-small-en-us-0.15>
 LLM_CLI_PATH    = os.path.expanduser("~/llama.cpp/build/bin/llama-cli")
 LLM_MODEL_PATH  = os.path.expanduser("~/gpt4all-cli/medicine-llm.Q4_K_M.gguf")
 GEN_TOKENS      = "64"
-
 # === Verify model and executable exist ===
 for path, desc in [
     (VOSK_MODEL_PATH, "Vosk model directory"),
@@ -41,7 +37,7 @@ audio_queue = queue.Queue()
 def audio_callback(indata, frames, time_info, status):
     """Queue raw audio data from microphone."""
     if status:
-        print(f"WARNING: Audio input error: {status}", file=sys.stderr)
+print(f"WARNING: Audio input error: {status}", file=sys.stderr)
     audio_queue.put(bytes(indata))
 
 def record_and_recognize():
@@ -58,49 +54,17 @@ def record_and_recognize():
                 result = json.loads(recognizer.Result())
                 return result.get("text", "")
 
-# === Load fixed Q&A from fixedqa.txt ===
-FIXED_QA = {}
-fixedqa_path = os.path.join(os.path.dirname(__file__), "fixedqa.txt")
-if os.path.exists(fixedqa_path):
-    with open(fixedqa_path, encoding="utf-8") as fq:
-        for line in fq:
-            line = line.strip()
-            if not line or "\t" not in line:
-                continue
-            q, a = line.split("\t", 1)
-            FIXED_QA[q.strip()] = a.strip()
-    FIXED_QUESTIONS = list(FIXED_QA.keys())
-else:
-    FIXED_QUESTIONS = []
-
-def lookup_fuzzy(question: str, score_cutoff: int = 70):
-    """
-    Use RapidFuzz to find the most similar fixed question.
-    Returns (answer, score) or (None, 0).
-    """
-    norm = re.sub(r"[，。！？,.!?]", "", question).strip().lower()
-    best = process.extractOne(
-        norm,
-        FIXED_QUESTIONS,
-        scorer=fuzz.token_set_ratio,
-        score_cutoff=score_cutoff
-    )
-    if best:
-        matched_q, score, _ = best
-        return FIXED_QA[matched_q], score
-    return None, 0
-
 def call_llm(prompt_text):
     """Invoke llama-cli non-interactively and filter out log lines."""
-    proc = subprocess.run(
-        [LLM_CLI_PATH, "-m", LLM_MODEL_PATH, "-p", prompt_text,
-         "-n", GEN_TOKENS, "--temp", "0.0", "--repeat_penalty", "1.0"],
+proc = subprocess.run(
+        [LLM_CLI_PATH, "-m", LLM_MODEL_PATH, "-p", prompt_text, "-n", GEN_TOKEN>
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
     )
     if proc.returncode != 0:
         return f"[ERROR] llama-cli exit {proc.returncode}"
     filtered = []
     for line in proc.stdout.splitlines():
+        # skip internal logs and performance lines
         if re.match(r'^\s*\w+ seed:', line): continue
         if re.match(r'^\s*sampler params:', line): continue
         if re.match(r'^\s*sampler chain:', line): continue
@@ -111,7 +75,6 @@ def call_llm(prompt_text):
         if re.match(r'^[^\w]+$', line): continue
         filtered.append(line)
     return " ".join(filtered).strip()
-
 def speak_text(text):
     """Use espeak to speak the text."""
     subprocess.run(["espeak", "-s", "140", text])
@@ -120,16 +83,18 @@ class VoiceLLMApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Voice Assistant")
+        # set window to a fixed smaller size
         self.geometry("480x320")
         self.configure(bg="black")
 
+        # Buttons frame at bottom
         btn_frame = tk.Frame(self, bg="black")
         btn_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=5)
 
         self.record_btn = tk.Button(
             btn_frame, text=" ^=^n  Record", font=("Helvetica", 14),
             command=self.on_record, bg="green", fg="white",
-            padx=10, pady=5
+ padx=10, pady=5
         )
         self.record_btn.pack(side=tk.LEFT, padx=5)
 
@@ -140,11 +105,12 @@ class VoiceLLMApp(tk.Tk):
         )
         self.quit_btn.pack(side=tk.RIGHT, padx=5)
 
+        # Text area fills remaining space
         self.text_area = scrolledtext.ScrolledText(
             self, wrap=tk.WORD, font=("Helvetica", 12),
             bg="black", fg="white"
         )
-        self.text_area.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.text_area.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pad>
         self.text_area.insert(tk.END, "Tap [ ^=^n  Record] to start...\n\n")
         self.text_area.config(state=tk.DISABLED)
 
@@ -161,34 +127,22 @@ class VoiceLLMApp(tk.Tk):
         threading.Thread(target=self.process_voice).start()
 
     def process_voice(self):
-        """Full pipeline: ASR -> FixedQA lookup -> LLM -> display & TTS."""
+        """Full pipeline: ASR  ^f^r LLM  ^f^r display & TTS."""
         self.append_text(" ^=^n  Listening...")
         text = record_and_recognize()
         if not text:
             self.append_text("[Warning] No speech recognized.")
             self.record_btn.config(state=tk.NORMAL)
             return
-
         self.append_text(f"You: {text}")
 
-        # 1) Fuzzy fixed QA lookup
-        fixed_ans, score = lookup_fuzzy(text)
-        if fixed_ans:
-            self.append_text(" ^= ^v Thinking......")
-            for i in range(1, 400000000):
-                i+=1
-            self.append_text(f"quick answer: {fixed_ans}")
-            speak_text(fixed_ans)
-            self.record_btn.config(state=tk.NORMAL)
-            return
-
-        # 2) Otherwise call LLM
         self.append_text(" ^= ^v Thinking...")
         response = call_llm(text)
         self.append_text(f"Assistant: {response}")
-        speak_text(response)
 
+        speak_text(response)
         self.record_btn.config(state=tk.NORMAL)
+
     def on_quit(self):
         """Exit the application."""
         self.destroy()
